@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gocraft/dbr/v2/dialect"
+	"github.com/mymdz/dbr/dialect"
 )
 
 // Open creates a Connection.
@@ -30,6 +30,8 @@ func Open(driver, dsn string, log EventReceiver) (*Connection, error) {
 		d = dialect.SQLite3
 	case "mssql":
 		d = dialect.MSSQL
+	case "clickhouse":
+		d = dialect.Clickhouse
 	default:
 		return nil, ErrNotSupported
 	}

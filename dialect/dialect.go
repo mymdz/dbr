@@ -11,6 +11,8 @@ var (
 	SQLite3 = sqlite3{}
 	// MSSQL dialect
 	MSSQL = mssql{}
+	// Clickhouse dialect
+	Clickhouse = clickhouse{}
 )
 
 const (

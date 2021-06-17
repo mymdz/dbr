@@ -1,4 +1,4 @@
-module github.com/gocraft/dbr/v2
+module github.com/mymdz/dbr
 
 go 1.13
 
