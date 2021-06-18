@@ -13,4 +13,5 @@ var (
 	ErrInvalidSliceLength = errors.New("dbr: length of slice is 0. length must be >= 1")
 	ErrCantConvertToTime  = errors.New("dbr: can't convert to time.Time")
 	ErrInvalidTimestring  = errors.New("dbr: invalid time string")
+	ErrFailedCheckQuery   = errors.New("dbr: failed to execute test query")
 )

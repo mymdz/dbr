@@ -1,12 +1,130 @@
-# gocraft/dbr (database records)
-
-[![GoDoc](https://godoc.org/github.com/gocraft/dbr?status.png)](https://godoc.org/github.com/gocraft/dbr)
-[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fgocraft%2Fdbr.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fgocraft%2Fdbr?ref=badge_shield)
-[![Go Report Card](https://goreportcard.com/badge/github.com/gocraft/dbr)](https://goreportcard.com/report/github.com/gocraft/dbr)
-[![CircleCI](https://circleci.com/gh/gocraft/dbr.svg?style=svg)](https://circleci.com/gh/gocraft/dbr)
-
 gocraft/dbr provides additions to Go's database/sql for super fast performance and convenience.
 
+## Отличия от оригинальной библиотеки
+
+* Добавлена поддержка clickhouse (аналогично mailru/dbr, но от актуальной версии оригинала с исправленными багами)
+* Реализована возможность автоматически повторять неудачные запросы
+
+### Clickhouse
+
+Для подключения к Clickhouse рекомендую библиотеку github.com/mailru/go-clickhouse. Пример использования:
+
+```go
+import (
+    "fmt"
+    _ "github.com/lib/pq"
+    "github.com/mailru/go-clickhouse"
+    _ "github.com/mailru/go-clickhouse"
+    "github.com/mymdz/dbr"
+    "github.com/sirupsen/logrus"
+)
+
+func GetClickHouseDSN(dbConfig *config.Db) string {
+	clickConf := clickhouse.Config{
+		User:     dbConfig.Username,
+		Password: dbConfig.Password,
+		Scheme:   "http",
+		Host:     fmt.Sprintf("%s:%d", dbConfig.Host, dbConfig.Port),
+		Database: dbConfig.DbName,
+	}
+
+	return clickConf.FormatDSN()
+}
+
+func main() {
+    connect, err := dbr.Open(
+        "clickhouse",
+        connector.GetClickHouseDSN(dbConfig),
+        createDBEventReceiver(true), // ниже подробнее об этом
+        )
+    if err != nil {
+        logrus.Error("Failed to connect to ClickHouse: ", err)
+        return err
+    }
+}
+```
+
+Исходная библиотека позволяет логировать все запросы, улетающие в базу, ловить ошибки и следить за временем выполнения зпросов. 
+Для этого необходимо реализовать интерфейс EventReceiver (для ошибок и таймингов) и TracingEventReceiver для логирования всех запросов до начала выполнения.
+Ниже пример реализации:
+
+```go
+// NullEventReceiver is a sentinel EventReceiver; use it if the caller doesn't supply one
+type DatabaseEventReceiver struct {
+	logQueries bool
+	PromErr    prometheus.Counter
+	PromTiming prometheus.Histogram
+}
+
+func createDBEventReceiver(logQueries bool) *DatabaseEventReceiver {
+	var erc = &DatabaseEventReceiver{
+		PromErr: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:      "failed_queries",
+			Help:      "How long it took to process the request",
+		}),
+		PromTiming: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:      "query_time",
+				Help:      "How long it took to process the request",
+				Buckets:   []float64{.00005, .0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+			},
+		),
+
+		logQueries: logQueries,
+	}
+
+	prometheus.MustRegister(erc.PromErr)
+	prometheus.MustRegister(erc.PromTiming)
+
+	return erc
+}
+
+// Event receives a simple notification when various events occur
+func (n *DatabaseEventReceiver) Event(eventName string) {}
+
+// EventKv receives a notification when various events occur along with
+// optional key/value data
+func (n *DatabaseEventReceiver) EventKv(eventName string, kvs map[string]string) {}
+
+// EventErr receives a notification of an error if one occurs
+func (n *DatabaseEventReceiver) EventErr(eventName string, err error) error { return err }
+
+// EventErrKv receives a notification of an error if one occurs along with
+// optional key/value data
+func (n *DatabaseEventReceiver) EventErrKv(eventName string, err error, kvs map[string]string) error {
+    n.PromErr.Add(1)
+    retries, ok := kvs["retries_left"]
+    if !ok {
+        retries = "0"
+    }
+    logrus.Errorf("Database query failure (will be retried %s times): %s", retries, kvs["sql"])
+    return err
+}
+
+// Timing receives the time an event took to happen
+func (n *DatabaseEventReceiver) Timing(eventName string, nanoseconds int64) {}
+
+// TimingKv receives the time an event took to happen along with optional key/value data
+func (n *DatabaseEventReceiver) TimingKv(eventName string, nanoseconds int64, kvs map[string]string) {
+	n.PromTiming.Observe(time.Duration(nanoseconds).Seconds())
+}
+
+func (n *DatabaseEventReceiver) SpanStart(ctx context.Context, eventName, query string) context.Context {
+	if n.logQueries {
+		logrus.Infof(query)
+	}
+	return ctx
+}
+
+func (n *DatabaseEventReceiver) SpanError(ctx context.Context, err error) {}
+
+func (n *DatabaseEventReceiver) SpanFinish(ctx context.Context) {}
+```
+
+
+
+
+# Документация оригинальной библиотеки
 ```
 $ go get -u github.com/gocraft/dbr/v2
 ```

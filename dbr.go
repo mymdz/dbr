@@ -35,7 +35,14 @@ func Open(driver, dsn string, log EventReceiver) (*Connection, error) {
 	default:
 		return nil, ErrNotSupported
 	}
-	return &Connection{DB: conn, EventReceiver: log, Dialect: d}, nil
+
+	connection := &Connection{DB: conn, EventReceiver: log, Dialect: d}
+
+	if _, err := connection.Exec("SELECT 1"); err != nil {
+		return nil, ErrFailedCheckQuery
+	}
+
+	return connection, nil
 }
 
 const (
@@ -48,6 +55,7 @@ type Connection struct {
 	*sql.DB
 	Dialect
 	EventReceiver
+	RetryConfig
 }
 
 // Session represents a business unit of execution.
@@ -65,6 +73,21 @@ type Session struct {
 	Timeout time.Duration
 }
 
+// RetryConfig defines properties for retrying failed queries
+//
+// If a query failed it will be rerun after InitialDelay. Next retries will be performed after InitialDelay * ProgressiveFactor
+// For example, if you want query to be retried after a fixed delay 3 times, eg 10ms, 10ms, 10ms then make
+// InitialDelay: 10 * time.Millisecond
+// Retries: 3
+// ProgressiveFactor: 1
+//
+// If you make ProgressiveFactor = 2, delays will be 10ms, 20ms, 40ms
+type RetryConfig struct {
+	InitialDelay time.Duration
+	Retries int
+	ProgressiveFactor int
+}
+
 // GetTimeout returns current timeout enforced in session.
 func (sess *Session) GetTimeout() time.Duration {
 	return sess.Timeout
@@ -77,6 +100,11 @@ func (conn *Connection) NewSession(log EventReceiver) *Session {
 		log = conn.EventReceiver // Use parent instrumentation
 	}
 	return &Session{Connection: conn, EventReceiver: log}
+}
+
+func (conn *Connection) SetRetryConfig(config RetryConfig) *Connection {
+	conn.RetryConfig = config
+	return conn
 }
 
 // Ensure that tx and session are session runner
@@ -154,7 +182,7 @@ func exec(ctx context.Context, runner runner, log EventReceiver, builder Builder
 	return result, nil
 }
 
-func queryRows(ctx context.Context, runner runner, log EventReceiver, builder Builder, d Dialect) (string, *sql.Rows, error) {
+func queryRows(ctx context.Context, runner runner, log EventReceiver, builder Builder, d Dialect, retry RetryConfig) (string, *sql.Rows, error) {
 	// discard the timeout set in the runner, the context should not be canceled
 	// implicitly here but explicitly by the caller since the returned *sql.Rows
 	// may still listening to the context
@@ -185,20 +213,40 @@ func queryRows(ctx context.Context, runner runner, log EventReceiver, builder Bu
 		defer traceImpl.SpanFinish(ctx)
 	}
 
-	rows, err := runner.QueryContext(ctx, query, value...)
-	if err != nil {
-		if hasTracingImpl {
-			traceImpl.SpanError(ctx, err)
-		}
-		return query, nil, log.EventErrKv("dbr.select.load.query", err, kvs{
-			"sql": query,
-		})
+	retriesLeft := retry.Retries
+	retryDelay := retry.InitialDelay
+	factor := retry.ProgressiveFactor
+	if factor == 0 {
+		factor = 1
 	}
 
-	return query, rows, nil
+	for {
+		rows, err := runner.QueryContext(ctx, query, value...)
+		if err != nil {
+			if hasTracingImpl {
+				traceImpl.SpanError(ctx, err)
+			}
+
+			err = log.EventErrKv("dbr.select.load.query", err, kvs{
+				"sql": query,
+				"retries_left": fmt.Sprintf("%d", retriesLeft),
+			})
+
+			if retriesLeft <= 0 {
+				return query, nil, err
+			}
+
+			time.Sleep(retryDelay)
+
+			retriesLeft--
+			retryDelay = retryDelay * time.Duration(factor)
+		} else {
+			return query, rows, nil
+		}
+	}
 }
 
-func query(ctx context.Context, runner runner, log EventReceiver, builder Builder, d Dialect, dest interface{}) (int, error) {
+func query(ctx context.Context, runner runner, log EventReceiver, builder Builder, d Dialect, retry RetryConfig, dest interface{}) (int, error) {
 	timeout := runner.GetTimeout()
 	if timeout > 0 {
 		var cancel func()
@@ -206,7 +254,7 @@ func query(ctx context.Context, runner runner, log EventReceiver, builder Builde
 		defer cancel()
 	}
 
-	query, rows, err := queryRows(ctx, runner, log, builder, d)
+	query, rows, err := queryRows(ctx, runner, log, builder, d, retry)
 	if err != nil {
 		return 0, err
 	}

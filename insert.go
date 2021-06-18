@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/gocraft/dbr/v2/dialect"
+	"github.com/mymdz/dbr/dialect"
 )
 
 // InsertStmt builds `INSERT INTO ...`.
@@ -14,6 +14,7 @@ type InsertStmt struct {
 	runner
 	EventReceiver
 	Dialect
+	RetryConfig
 
 	raw
 
@@ -234,6 +235,11 @@ func (b *InsertStmt) Pair(column string, value interface{}) *InsertStmt {
 	return b
 }
 
+func (b *InsertStmt) WithRetryConfig(conf RetryConfig) *InsertStmt {
+	b.RetryConfig = conf
+	return b
+}
+
 func (b *InsertStmt) Exec() (sql.Result, error) {
 	return b.ExecContext(context.Background())
 }
@@ -255,7 +261,7 @@ func (b *InsertStmt) ExecContext(ctx context.Context) (sql.Result, error) {
 }
 
 func (b *InsertStmt) LoadContext(ctx context.Context, value interface{}) error {
-	_, err := query(ctx, b.runner, b.EventReceiver, b, b.Dialect, value)
+	_, err := query(ctx, b.runner, b.EventReceiver, b, b.Dialect, b.RetryConfig, value)
 	return err
 }
 

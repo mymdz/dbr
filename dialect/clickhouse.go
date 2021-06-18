@@ -68,21 +68,6 @@ func (d clickhouse) Placeholder(_ int) string {
 	return "?"
 }
 
-func (d clickhouse) OnConflict(_ string) string {
-	return ""
-}
-
-func (d clickhouse) Proposed(_ string) string {
-	return ""
-}
-
-func (d clickhouse) Limit(offset, limit int64) string {
-	if offset < 0 {
-		return fmt.Sprintf("LIMIT %d", limit)
-	}
-	return fmt.Sprintf("LIMIT %d,%d", offset, limit)
-}
-
 func (d clickhouse) String() string {
 	return "clickhouse"
 }

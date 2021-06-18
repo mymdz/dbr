@@ -11,6 +11,7 @@ type UpdateStmt struct {
 	runner
 	EventReceiver
 	Dialect
+	RetryConfig
 
 	raw
 
@@ -197,6 +198,11 @@ func (b *UpdateStmt) Comment(comment string) *UpdateStmt {
 	return b
 }
 
+func (b *UpdateStmt) WithRetryConfig(conf RetryConfig) *UpdateStmt {
+	b.RetryConfig = conf
+	return b
+}
+
 func (b *UpdateStmt) Exec() (sql.Result, error) {
 	return b.ExecContext(context.Background())
 }
@@ -206,7 +212,7 @@ func (b *UpdateStmt) ExecContext(ctx context.Context) (sql.Result, error) {
 }
 
 func (b *UpdateStmt) LoadContext(ctx context.Context, value interface{}) error {
-	_, err := query(ctx, b.runner, b.EventReceiver, b, b.Dialect, value)
+	_, err := query(ctx, b.runner, b.EventReceiver, b, b.Dialect, b.RetryConfig, value)
 	return err
 }
 

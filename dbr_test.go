@@ -8,7 +8,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/gocraft/dbr/v2/dialect"
+	"github.com/mymdz/dbr/dialect"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/denisenkom/go-mssqldb"
