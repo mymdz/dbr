@@ -121,7 +121,24 @@ func (n *DatabaseEventReceiver) SpanError(ctx context.Context, err error) {}
 func (n *DatabaseEventReceiver) SpanFinish(ctx context.Context) {}
 ```
 
+### Повторение запросов
 
+При ошибках можно автоматически повторять запрос с какой-то задержкой. Пример:
+```go
+connect.SetRetryConfig(dbr.RetryConfig{
+    InitialDelay: 10 * time.Millisecond, // первоначальная задержка перед повторным запросом
+    Retries:      2, // количество повторов
+    ProgressiveFactor: 1, // Если например 2, то задержка при дополнительных попытках будет 10, 20, 40, 80...
+})
+```
+RetryConfig задается для подключения, но можно выставить свой RetryConfig для отдельного запроса:
+```go
+connect.Select("name").
+    From("users").
+    Where(dbr.Eq("user_id", user.Id)).
+    WithRetryConfig(dbr.RetryConfig{ Retries: 2 }).
+    Load(&userName)
+```
 
 
 # Документация оригинальной библиотеки
